@@ -1,7 +1,141 @@
-# 勤怠管理
-とんかつ安心で動いてる勤怠管理の実態
-人がVCチャンネルに入ると通知してくれるぞ
-[Docker HubのDockerイメージ](https://hub.docker.com/repository/docker/chikenman/discord_timecard)をpullして以下の環境変数を設定した上で起動時に設定したenvを指定すれば動かせる
-  
-BOT_TOKEN=<YOUR_BOT_TOKEN>  
-CHANNEL_ID=<NOTIFICATION_CHANNEL_ID>  
+# Discord Voice Channel Notification Bot
+
+複数のDiscordサーバーでボイスチャンネルの参加・退出・移動を通知するボットです。
+
+## 機能
+
+- 🔊 ボイスチャンネルの参加・退出・移動を自動通知
+- 🌐 複数サーバー対応
+- ⚙️ サーバー毎の個別設定
+- 🕐 タイムゾーン対応
+- 🎛️ 通知の有効/無効切り替え
+- 💬 わかりやすい日本語メッセージ
+
+## 最新バージョン
+
+- Discord.py: 2.5.2
+- 複数サーバー対応
+- 改良されたユーザーインターフェース
+
+## セットアップ
+
+### 1. 必要なパッケージのインストール
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Discord Botトークンの設定
+
+環境変数 `BOT_TOKEN` にDiscord Botのトークンを設定してください。
+
+```bash
+export BOT_TOKEN=your_bot_token_here
+```
+
+### 3. ボットの起動
+
+```bash
+python bot.py
+```
+
+## 使用方法
+
+### 初期設定
+
+1. ボットをサーバーに招待
+2. 通知を受け取りたいチャンネルで `!setup` コマンドを実行
+3. 設定完了！
+
+### コマンド一覧
+
+| コマンド | 説明 | 必要権限 |
+|---------|------|---------|
+| `!setup [#チャンネル]` | 通知チャンネルを設定 | サーバー管理 |
+| `!enable` | 通知を有効化 | サーバー管理 |
+| `!disable` | 通知を無効化 | サーバー管理 |
+| `!status` | 現在の設定を確認 | なし |
+| `!help` | ヘルプを表示 | なし |
+
+### 設定例
+
+```bash
+# 現在のチャンネルを通知先に設定
+!setup
+
+# 特定のチャンネルを通知先に設定
+!setup #voice-log
+
+# 現在の設定を確認
+!status
+
+# 通知を無効化
+!disable
+
+# 通知を有効化
+!enable
+```
+
+## 設定ファイル
+
+`config.json` ファイルでサーバー毎の設定を管理します。
+
+```json
+{
+    "servers": {
+        "サーバーID": {
+            "channel_id": "通知チャンネルID",
+            "enabled": true,
+            "timezone_offset": 9
+        }
+    },
+    "default_settings": {
+        "enabled": true,
+        "timezone_offset": 9
+    }
+}
+```
+
+## Docker使用
+
+```bash
+# Dockerイメージをビルド
+docker build -t discord-voice-bot .
+
+# コンテナを起動
+docker run -e BOT_TOKEN=your_token_here discord-voice-bot
+```
+
+## 必要な権限
+
+ボットに以下の権限を付与してください：
+
+- メッセージを送信
+- メッセージ履歴を読む
+- 埋め込みリンク
+- ボイスチャンネルの状態を表示
+
+## 通知メッセージの例
+
+```
+2024/01/01 12:00:00 ユーザー名 が 一般ボイス に参加しました
+2024/01/01 12:05:00 ユーザー名 が 一般ボイス から退出しました
+2024/01/01 12:10:00 ユーザー名 が 一般ボイス から 会議室 に移動しました
+```
+
+## 変更履歴
+
+### v2.0.0 (最新)
+- Discord.py 2.5.2にアップデート
+- 複数サーバー対応
+- 設定コマンドの追加
+- エラーハンドリングの改善
+- 日本語メッセージの改善
+
+### v1.0.0
+- 初期リリース
+- 単一サーバー対応
+
+## ライセンス
+
+このプロジェクトはMITライセンスの下で公開されています。

@@ -6,3 +6,4 @@ app.yaml
 __pycache__/settings.cpython-37.pyc
 __pycache__/setting.cpython-37.pyc
 .python-version
+config.json
