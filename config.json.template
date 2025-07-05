@@ -1,0 +1,13 @@
+{
+    "servers": {
+        "123456789012345678": {
+            "channel_id": "987654321098765432",
+            "enabled": true,
+            "timezone_offset": 9
+        }
+    },
+    "default_settings": {
+        "enabled": true,
+        "timezone_offset": 9
+    }
+}
