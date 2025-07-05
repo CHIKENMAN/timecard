@@ -6,35 +6,86 @@ import json
 import os
 import asyncio
 import logging
+import threading
+import time
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# 設定ファイルパス
+CONFIG_PATH = 'config.json'
+
 # 設定ファイルの読み込み
 def load_config():
-    config_path = 'config.json'
-    if os.path.exists(config_path):
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"設定ファイル読み込みエラー: {e}")
+            return get_default_config()
     else:
-        logger.warning(f"設定ファイル {config_path} が見つかりません。デフォルト設定を使用します。")
-        return {
-            "servers": {},
-            "default_settings": {
-                "enabled": True,
-                "timezone_offset": 9
-            }
+        logger.warning(f"設定ファイル {CONFIG_PATH} が見つかりません。デフォルト設定を使用します。")
+        return get_default_config()
+
+def get_default_config():
+    """デフォルト設定を取得"""
+    return {
+        "servers": {},
+        "default_settings": {
+            "enabled": True,
+            "timezone_offset": 9
         }
+    }
 
 # 設定の保存
 def save_config(config):
-    config_path = 'config.json'
-    with open(config_path, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=4, ensure_ascii=False)
+    try:
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+        logger.debug("設定ファイルを保存しました")
+    except IOError as e:
+        logger.error(f"設定ファイル保存エラー: {e}")
 
-# グローバル設定
-config = load_config()
+# 設定管理クラス
+class ConfigManager:
+    def __init__(self):
+        self._config = load_config()
+        self._lock = threading.Lock()
+        self._last_modified = self._get_file_modified_time()
+        
+    def _get_file_modified_time(self):
+        """設定ファイルの最終更新時刻を取得"""
+        try:
+            return os.path.getmtime(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else 0
+        except OSError:
+            return 0
+    
+    def _refresh_if_needed(self):
+        """必要に応じて設定を再読み込み"""
+        current_modified = self._get_file_modified_time()
+        if current_modified > self._last_modified:
+            logger.info("設定ファイルが更新されました。再読み込みします。")
+            self._config = load_config()
+            self._last_modified = current_modified
+    
+    def get_config(self):
+        """現在の設定を取得（自動再読み込み）"""
+        with self._lock:
+            self._refresh_if_needed()
+            return self._config.copy()
+    
+    def update_config(self, updater_func):
+        """設定を安全に更新"""
+        with self._lock:
+            self._refresh_if_needed()
+            updater_func(self._config)
+            save_config(self._config)
+            self._last_modified = self._get_file_modified_time()
+
+# グローバル設定管理インスタンス
+config_manager = ConfigManager()
 
 intents = discord.Intents.default()
 intents.voice_states = True
@@ -45,6 +96,7 @@ bot = commands.Bot(intents=intents, command_prefix='!')
 
 def get_server_config(guild_id):
     """サーバー固有の設定を取得"""
+    config = config_manager.get_config()
     guild_id_str = str(guild_id)
     if guild_id_str in config["servers"]:
         return config["servers"][guild_id_str]
@@ -64,6 +116,7 @@ def get_destination_channel(guild_id):
 
 def get_timezone_offset(guild_id):
     """サーバー固有のタイムゾーンオフセットを取得"""
+    config = config_manager.get_config()
     server_config = get_server_config(guild_id)
     if server_config:
         return server_config.get("timezone_offset", config["default_settings"]["timezone_offset"])
@@ -75,6 +128,19 @@ async def on_ready():
     logger.info(f'ボットは {len(bot.guilds)} サーバーに参加しています')
     for guild in bot.guilds:
         logger.info(f'- {guild.name} (ID: {guild.id})')
+    
+    # 設定監視タスクを開始
+    asyncio.create_task(config_monitor_task())
+
+async def config_monitor_task():
+    """設定ファイル監視タスク"""
+    while True:
+        await asyncio.sleep(30)  # 30秒ごとにチェック
+        try:
+            # 設定の再読み込みをトリガー
+            config_manager.get_config()
+        except Exception as e:
+            logger.error(f"設定監視エラー: {e}")
 
 @bot.event
 async def on_guild_join(guild):
@@ -110,14 +176,15 @@ async def setup_channel(ctx, channel: discord.TextChannel = None):
     guild_id = str(ctx.guild.id)
     
     # 設定の更新
-    if guild_id not in config["servers"]:
-        config["servers"][guild_id] = {}
+    def update_server_config(config):
+        if guild_id not in config["servers"]:
+            config["servers"][guild_id] = {}
+        
+        config["servers"][guild_id]["channel_id"] = str(channel.id)
+        config["servers"][guild_id]["enabled"] = True
+        config["servers"][guild_id]["timezone_offset"] = config["default_settings"]["timezone_offset"]
     
-    config["servers"][guild_id]["channel_id"] = str(channel.id)
-    config["servers"][guild_id]["enabled"] = True
-    config["servers"][guild_id]["timezone_offset"] = config["default_settings"]["timezone_offset"]
-    
-    save_config(config)
+    config_manager.update_config(update_server_config)
     
     embed = discord.Embed(
         title="✅ 設定完了",
@@ -135,9 +202,19 @@ async def disable_notifications(ctx):
     
     guild_id = str(ctx.guild.id)
     
-    if guild_id in config["servers"]:
-        config["servers"][guild_id]["enabled"] = False
-        save_config(config)
+    def update_server_config(config):
+        if guild_id in config["servers"]:
+            config["servers"][guild_id]["enabled"] = False
+            return True
+        return False
+    
+    success = [False]
+    def wrapper(config):
+        success[0] = update_server_config(config)
+    
+    config_manager.update_config(wrapper)
+    
+    if success[0]:
         await ctx.send("✅ ボイスチャンネル通知を無効にしました。")
     else:
         await ctx.send("❌ このサーバーはまだ設定されていません。")
@@ -151,9 +228,19 @@ async def enable_notifications(ctx):
     
     guild_id = str(ctx.guild.id)
     
-    if guild_id in config["servers"]:
-        config["servers"][guild_id]["enabled"] = True
-        save_config(config)
+    def update_server_config(config):
+        if guild_id in config["servers"]:
+            config["servers"][guild_id]["enabled"] = True
+            return True
+        return False
+    
+    success = [False]
+    def wrapper(config):
+        success[0] = update_server_config(config)
+    
+    config_manager.update_config(wrapper)
+    
+    if success[0]:
         await ctx.send("✅ ボイスチャンネル通知を有効にしました。")
     else:
         await ctx.send("❌ このサーバーはまず設定する必要があります。`!setup` コマンドを使用してください。")
@@ -187,6 +274,21 @@ async def check_status(ctx):
             color=discord.Color.red()
         )
         await ctx.send(embed=embed)
+
+@bot.command(name='reload')
+async def reload_config(ctx):
+    """設定の手動再読み込み（管理者用）"""
+    if not ctx.author.guild_permissions.manage_guild:
+        await ctx.send("❌ この機能を使用するには「サーバー管理」権限が必要です。")
+        return
+    
+    try:
+        # 強制的に設定を再読み込み
+        config_manager._refresh_if_needed()
+        await ctx.send("✅ 設定ファイルを再読み込みしました。")
+    except Exception as e:
+        logger.error(f"設定再読み込みエラー: {e}")
+        await ctx.send("❌ 設定の再読み込みに失敗しました。")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -237,6 +339,7 @@ async def help_command(ctx):
               "`!enable` - 通知を有効化\n"
               "`!disable` - 通知を無効化\n"
               "`!status` - 現在の設定を確認\n"
+              "`!reload` - 設定を手動再読み込み\n"
               "`!help` - このヘルプを表示",
         inline=False
     )
